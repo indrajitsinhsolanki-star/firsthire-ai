@@ -98,6 +98,8 @@ Existing TalentGPT AI recruiting platform rebranded to FirstHire.ai. Built with 
 - [x] AI Recruiting Agents
 - [x] Comments on candidates
 - [x] Rebrand to FirstHire.ai
+- [x] Expanded candidate database (71 candidates)
+- [x] Flexible search matching (always shows results)
 
 ### P1 (Future)
 - [ ] Real email sending (currently simulated)

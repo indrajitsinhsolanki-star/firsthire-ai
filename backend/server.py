@@ -315,41 +315,115 @@ async def generate_email_ai(candidate: Dict, email_type: str = "initial") -> str
         return f"Hi {candidate.get('name')},\n\nI'm impressed by your background. I think there's a great opportunity that aligns with your experience.\n\nLet's connect!\n\nBest regards,\nFirstHire.ai Team"
 
 def calculate_match_score(candidate: Dict, filters: Dict) -> int:
-    """Calculate match score between candidate and search filters"""
+    """Calculate match score between candidate and search filters with partial matching"""
     score = 0
     max_score = 0
     
+    # Seniority matching (exact or adjacent level)
     if filters.get('seniority'):
-        max_score += 20
-        if candidate.get('seniority', '').lower() == filters['seniority'].lower():
-            score += 20
+        max_score += 25
+        candidate_seniority = candidate.get('seniority', '').lower()
+        filter_seniority = filters['seniority'].lower()
+        
+        seniority_levels = ['junior', 'mid', 'senior', 'director', 'vp', 'c-suite']
+        try:
+            cand_idx = seniority_levels.index(candidate_seniority) if candidate_seniority in seniority_levels else -1
+            filt_idx = seniority_levels.index(filter_seniority) if filter_seniority in seniority_levels else -1
+            
+            if cand_idx == filt_idx:
+                score += 25  # Exact match
+            elif abs(cand_idx - filt_idx) == 1:
+                score += 15  # Adjacent level
+            elif abs(cand_idx - filt_idx) == 2:
+                score += 8   # Two levels away
+        except ValueError:
+            pass
     
+    # Location matching (exact, partial, or regional)
     if filters.get('location'):
-        max_score += 20
-        if filters['location'].lower() in candidate.get('location', '').lower():
-            score += 20
+        max_score += 25
+        filter_loc = filters['location'].lower()
+        candidate_loc = candidate.get('location', '').lower()
+        
+        # Define regions for partial matching
+        us_west = ['san francisco', 'sf', 'los angeles', 'seattle', 'mountain view', 'palo alto', 'cupertino', 'menlo park']
+        us_east = ['new york', 'nyc', 'boston', 'washington']
+        europe = ['london', 'berlin', 'dublin', 'amsterdam', 'paris']
+        asia_pacific = ['singapore', 'dubai', 'tokyo', 'sydney', 'hong kong']
+        canada = ['toronto', 'vancouver', 'montreal']
+        
+        if filter_loc in candidate_loc or candidate_loc in filter_loc:
+            score += 25  # Exact match
+        elif filter_loc == 'remote' or candidate_loc == 'remote':
+            score += 20  # Remote is flexible
+        else:
+            # Check regional match
+            for region in [us_west, us_east, europe, asia_pacific, canada]:
+                filter_in_region = any(f in filter_loc for f in region)
+                cand_in_region = any(c in candidate_loc for c in region)
+                if filter_in_region and cand_in_region:
+                    score += 12  # Same region
+                    break
+            else:
+                score += 5  # Base score for having a location
     
+    # Skills matching (partial matching with weighting)
     if filters.get('skills'):
         max_score += 30
         candidate_skills = [s.lower() for s in candidate.get('skills', [])]
-        matched = sum(1 for s in filters['skills'] if s.lower() in candidate_skills)
-        if filters['skills']:
-            score += int((matched / len(filters['skills'])) * 30)
+        filter_skills = [s.lower() for s in filters['skills']]
+        
+        matched = sum(1 for s in filter_skills if any(s in cs or cs in s for cs in candidate_skills))
+        if filter_skills:
+            score += int((matched / len(filter_skills)) * 30)
+        
+        # Bonus for having many relevant skills
+        if len(candidate_skills) >= 4:
+            score += 3
     
+    # Industry matching (exact or related)
     if filters.get('industry'):
-        max_score += 10
-        if filters['industry'].lower() == candidate.get('industry', '').lower():
-            score += 10
+        max_score += 15
+        filter_ind = filters['industry'].lower()
+        candidate_ind = candidate.get('industry', '').lower()
+        
+        # Define related industries
+        tech_related = ['tech', 'saas', 'software', 'cloud', 'ai', 'data', 'devops', 'productivity']
+        finance_related = ['fintech', 'finance', 'banking', 'payments']
+        consumer_related = ['e-commerce', 'retail', 'travel', 'mobility', 'media', 'social media']
+        business_related = ['consulting', 'enterprise software', 'enterprise']
+        health_related = ['healthcare', 'health', 'biotech', 'pharma']
+        
+        if filter_ind in candidate_ind or candidate_ind in filter_ind:
+            score += 15  # Exact match
+        else:
+            for related in [tech_related, finance_related, consumer_related, business_related, health_related]:
+                filter_in_related = any(f in filter_ind for f in related)
+                cand_in_related = any(c in candidate_ind for c in related)
+                if filter_in_related and cand_in_related:
+                    score += 8  # Related industry
+                    break
     
+    # Experience years matching
     if filters.get('experience_years'):
-        max_score += 20
+        max_score += 15
         years = candidate.get('years_exp', 0)
-        if filters['experience_years'].get('min') and years >= filters['experience_years']['min']:
-            score += 10
-        if filters['experience_years'].get('max') and years <= filters['experience_years']['max']:
-            score += 10
+        min_years = filters['experience_years'].get('min', 0)
+        max_years = filters['experience_years'].get('max', 100)
+        
+        if min_years <= years <= max_years:
+            score += 15
+        elif abs(years - min_years) <= 2 or abs(years - max_years) <= 2:
+            score += 8  # Close to range
     
-    return int((score / max_score) * 100) if max_score > 0 else 50
+    # Calculate final score with minimum baseline
+    if max_score > 0:
+        final_score = int((score / max_score) * 100)
+    else:
+        final_score = 50  # Default score when no filters
+    
+    # Give everyone at least 20% for being in the database
+    return max(final_score, 20)
 
 # ==================== AUTH ROUTES ====================
 
@@ -407,29 +481,32 @@ async def search_candidates(data: SearchQuery, token: str):
     
     filters = await parse_search_query_ai(data.query)
     
-    query = {}
-    if filters.get('seniority'):
-        query['seniority'] = filters['seniority']
-    if filters.get('location'):
-        query['location'] = {"$regex": filters['location'], "$options": "i"}
-    if filters.get('industry'):
-        query['industry'] = {"$regex": filters['industry'], "$options": "i"}
+    # Get ALL candidates first (no strict filtering)
+    all_candidates = await db.candidates.find({}, {"_id": 0}).to_list(500)
     
-    candidates = await db.candidates.find(query, {"_id": 0}).to_list(100)
-    
-    # Filter by skills if specified
-    if filters.get('skills'):
-        candidates = [c for c in candidates if any(
-            skill.lower() in [s.lower() for s in c.get('skills', [])]
-            for skill in filters['skills']
-        )]
-    
-    # Calculate match scores
-    for candidate in candidates:
+    # Calculate match scores for ALL candidates
+    for candidate in all_candidates:
         candidate['match_score'] = calculate_match_score(candidate, filters)
     
-    # Sort by match score
-    candidates.sort(key=lambda x: x.get('match_score', 0), reverse=True)
+    # Sort by match score (highest first)
+    all_candidates.sort(key=lambda x: x.get('match_score', 0), reverse=True)
+    
+    # Always return at least 10 candidates, or all if less than 10 exist
+    min_results = 10
+    
+    # If we have filters, prioritize matches but always show results
+    if filters:
+        # Take top matches (score > 50) plus fill up to min_results
+        high_matches = [c for c in all_candidates if c.get('match_score', 0) >= 50]
+        
+        if len(high_matches) >= min_results:
+            candidates = high_matches[:20]  # Cap at 20 high matches
+        else:
+            # Fill with remaining candidates up to min_results
+            candidates = all_candidates[:max(min_results, len(high_matches))]
+    else:
+        # No filters - return top candidates
+        candidates = all_candidates[:20]
     
     return {"candidates": candidates, "filters": filters}
 
@@ -1040,6 +1117,7 @@ async def seed_database():
         return {"message": "Database already seeded", "count": count}
     
     mock_candidates = [
+        # Original 20 candidates
         {"name": "Alex Chen", "title": "Senior React Engineer", "company": "Stripe", "location": "San Francisco", "skills": ["React", "TypeScript", "Node.js", "AWS"], "years_exp": 7, "seniority": "Senior", "email": "alex.chen@email.com", "linkedin_url": "https://linkedin.com/in/alexchen", "industry": "FinTech", "availability": "Passive"},
         {"name": "Jordan Smith", "title": "Full Stack Engineer", "company": "Airbnb", "location": "New York", "skills": ["React", "Python", "PostgreSQL", "Docker"], "years_exp": 5, "seniority": "Mid", "email": "jordan.smith@email.com", "linkedin_url": "https://linkedin.com/in/jordansmith", "industry": "Travel", "availability": "Active"},
         {"name": "Morgan Taylor", "title": "Frontend Engineer", "company": "Netflix", "location": "Los Angeles", "skills": ["React", "JavaScript", "CSS", "GraphQL"], "years_exp": 4, "seniority": "Mid", "email": "morgan.taylor@email.com", "linkedin_url": "https://linkedin.com/in/morgantaylor", "industry": "Media", "availability": "Open to Work"},
@@ -1057,9 +1135,79 @@ async def seed_database():
         {"name": "Dakota Harris", "title": "Junior React Developer", "company": "Shopify", "location": "Toronto", "skills": ["React", "JavaScript", "HTML/CSS", "Git"], "years_exp": 1, "seniority": "Junior", "email": "dakota.harris@email.com", "linkedin_url": "https://linkedin.com/in/dakotaharris", "industry": "E-commerce", "availability": "Active"},
         {"name": "Spencer Clark", "title": "Sales Director", "company": "Salesforce", "location": "San Francisco", "skills": ["Sales Strategy", "Enterprise Sales", "Negotiations", "Team Leadership"], "years_exp": 12, "seniority": "Director", "email": "spencer.clark@email.com", "linkedin_url": "https://linkedin.com/in/spencerclark", "industry": "SaaS", "availability": "Passive"},
         {"name": "Finley White", "title": "Marketing Manager", "company": "HubSpot", "location": "Boston", "skills": ["Content Marketing", "SEO", "Analytics", "Growth"], "years_exp": 5, "seniority": "Mid", "email": "finley.white@email.com", "linkedin_url": "https://linkedin.com/in/finleywhite", "industry": "SaaS", "availability": "Open to Work"},
-        {"name": "River Green", "title": "Principal Engineer", "company": "Apple", "location": "Cupertino", "skills": ["System Architecture", "C++", "Leadership", "Innovation"], "years_exp": 15, "seniority": "C-Suite", "email": "river.green@email.com", "linkedin_url": "https://linkedin.com/in/rivergreen", "industry": "Tech", "availability": "Passive"},
+        {"name": "River Green", "title": "Principal Engineer", "company": "Apple", "location": "Cupertino", "skills": ["System Architecture", "C++", "Leadership", "Innovation"], "years_exp": 15, "seniority": "Director", "email": "river.green@email.com", "linkedin_url": "https://linkedin.com/in/rivergreen", "industry": "Tech", "availability": "Passive"},
         {"name": "Alex Thompson", "title": "Machine Learning Engineer", "company": "OpenAI", "location": "San Francisco", "skills": ["Python", "Machine Learning", "Deep Learning", "PyTorch"], "years_exp": 6, "seniority": "Senior", "email": "alex.thompson@email.com", "linkedin_url": "https://linkedin.com/in/alexthompson", "industry": "AI", "availability": "Passive"},
         {"name": "Alex King", "title": "Full Stack Engineer", "company": "Notion", "location": "San Francisco", "skills": ["React", "TypeScript", "Node.js", "PostgreSQL"], "years_exp": 6, "seniority": "Senior", "email": "alex.king@email.com", "linkedin_url": "https://linkedin.com/in/alexking", "industry": "Productivity", "availability": "Open to Work"},
+        
+        # 50 NEW DIVERSE CANDIDATES
+        # London-based candidates
+        {"name": "Oliver Bennett", "title": "Marketing Director", "company": "Revolut", "location": "London", "skills": ["Brand Strategy", "Digital Marketing", "Team Leadership", "Growth"], "years_exp": 10, "seniority": "Director", "email": "oliver.bennett@email.com", "linkedin_url": "https://linkedin.com/in/oliverbennett", "industry": "FinTech", "availability": "Passive"},
+        {"name": "Sophie Turner", "title": "Senior Data Analyst", "company": "Deliveroo", "location": "London", "skills": ["SQL", "Python", "Tableau", "Data Visualization"], "years_exp": 6, "seniority": "Senior", "email": "sophie.turner@email.com", "linkedin_url": "https://linkedin.com/in/sophieturner", "industry": "E-commerce", "availability": "Open to Work"},
+        {"name": "James Wright", "title": "HR Manager", "company": "Monzo", "location": "London", "skills": ["Talent Acquisition", "Employee Relations", "HRIS", "Compensation"], "years_exp": 7, "seniority": "Mid", "email": "james.wright@email.com", "linkedin_url": "https://linkedin.com/in/jameswright", "industry": "FinTech", "availability": "Active"},
+        {"name": "Emily Carter", "title": "Product Designer", "company": "Wise", "location": "London", "skills": ["Figma", "User Research", "Interaction Design", "Design Systems"], "years_exp": 5, "seniority": "Mid", "email": "emily.carter@email.com", "linkedin_url": "https://linkedin.com/in/emilycarter", "industry": "FinTech", "availability": "Open to Work"},
+        {"name": "William Hughes", "title": "Finance Manager", "company": "Checkout.com", "location": "London", "skills": ["Financial Planning", "Budgeting", "Excel", "SAP"], "years_exp": 8, "seniority": "Senior", "email": "william.hughes@email.com", "linkedin_url": "https://linkedin.com/in/williamhughes", "industry": "FinTech", "availability": "Passive"},
+        {"name": "Charlotte Davies", "title": "Junior Marketing Coordinator", "company": "Starling Bank", "location": "London", "skills": ["Social Media", "Content Creation", "Analytics", "Copywriting"], "years_exp": 2, "seniority": "Junior", "email": "charlotte.davies@email.com", "linkedin_url": "https://linkedin.com/in/charlottedavies", "industry": "FinTech", "availability": "Active"},
+        
+        # Dubai-based candidates
+        {"name": "Ahmed Hassan", "title": "Operations Director", "company": "Careem", "location": "Dubai", "skills": ["Operations Management", "Supply Chain", "Team Leadership", "Process Optimization"], "years_exp": 12, "seniority": "Director", "email": "ahmed.hassan@email.com", "linkedin_url": "https://linkedin.com/in/ahmedhassan", "industry": "Mobility", "availability": "Passive"},
+        {"name": "Fatima Al-Rashid", "title": "Senior Marketing Manager", "company": "Noon", "location": "Dubai", "skills": ["Digital Marketing", "Brand Management", "Campaign Strategy", "Analytics"], "years_exp": 8, "seniority": "Senior", "email": "fatima.alrashid@email.com", "linkedin_url": "https://linkedin.com/in/fatimaalrashid", "industry": "E-commerce", "availability": "Open to Work"},
+        {"name": "Khalid Mahmoud", "title": "Finance Director", "company": "Emirates NBD", "location": "Dubai", "skills": ["Financial Strategy", "Risk Management", "Team Leadership", "Regulatory Compliance"], "years_exp": 15, "seniority": "Director", "email": "khalid.mahmoud@email.com", "linkedin_url": "https://linkedin.com/in/khalidmahmoud", "industry": "Finance", "availability": "Passive"},
+        {"name": "Sara Khan", "title": "HR Director", "company": "Talabat", "location": "Dubai", "skills": ["HR Strategy", "Organizational Development", "Talent Management", "Culture Building"], "years_exp": 11, "seniority": "Director", "email": "sara.khan@email.com", "linkedin_url": "https://linkedin.com/in/sarakhan", "industry": "E-commerce", "availability": "Active"},
+        {"name": "Omar Youssef", "title": "Data Analyst", "company": "Kitopi", "location": "Dubai", "skills": ["SQL", "Excel", "Power BI", "Data Analysis"], "years_exp": 3, "seniority": "Junior", "email": "omar.youssef@email.com", "linkedin_url": "https://linkedin.com/in/omaryoussef", "industry": "Food Tech", "availability": "Open to Work"},
+        
+        # Singapore-based candidates
+        {"name": "Wei Lin Chen", "title": "Senior Product Manager", "company": "Grab", "location": "Singapore", "skills": ["Product Strategy", "Agile", "Data Analysis", "User Research"], "years_exp": 7, "seniority": "Senior", "email": "weilin.chen@email.com", "linkedin_url": "https://linkedin.com/in/weilinchen", "industry": "Mobility", "availability": "Passive"},
+        {"name": "Priya Sharma", "title": "Marketing Manager", "company": "Shopee", "location": "Singapore", "skills": ["E-commerce Marketing", "Performance Marketing", "Analytics", "Campaign Management"], "years_exp": 5, "seniority": "Mid", "email": "priya.sharma@email.com", "linkedin_url": "https://linkedin.com/in/priyasharma", "industry": "E-commerce", "availability": "Open to Work"},
+        {"name": "Kevin Tan", "title": "Sales Director", "company": "Sea Group", "location": "Singapore", "skills": ["Enterprise Sales", "Partnership Development", "Team Leadership", "Revenue Growth"], "years_exp": 10, "seniority": "Director", "email": "kevin.tan@email.com", "linkedin_url": "https://linkedin.com/in/kevintan", "industry": "Tech", "availability": "Passive"},
+        {"name": "Michelle Wong", "title": "Finance Manager", "company": "Lazada", "location": "Singapore", "skills": ["Financial Reporting", "Budgeting", "SAP", "Team Management"], "years_exp": 6, "seniority": "Mid", "email": "michelle.wong@email.com", "linkedin_url": "https://linkedin.com/in/michellewong", "industry": "E-commerce", "availability": "Active"},
+        {"name": "Raj Patel", "title": "Operations Manager", "company": "Gojek", "location": "Singapore", "skills": ["Operations Strategy", "Process Improvement", "Vendor Management", "Analytics"], "years_exp": 5, "seniority": "Mid", "email": "raj.patel@email.com", "linkedin_url": "https://linkedin.com/in/rajpatel", "industry": "Mobility", "availability": "Open to Work"},
+        {"name": "Jessica Lim", "title": "Junior Data Analyst", "company": "Carousell", "location": "Singapore", "skills": ["SQL", "Python", "Excel", "Tableau"], "years_exp": 1, "seniority": "Junior", "email": "jessica.lim@email.com", "linkedin_url": "https://linkedin.com/in/jessicalim", "industry": "E-commerce", "availability": "Active"},
+        
+        # Berlin-based candidates
+        {"name": "Hans Mueller", "title": "Engineering Director", "company": "Zalando", "location": "Berlin", "skills": ["Engineering Leadership", "System Architecture", "Agile", "Team Building"], "years_exp": 12, "seniority": "Director", "email": "hans.mueller@email.com", "linkedin_url": "https://linkedin.com/in/hansmueller", "industry": "E-commerce", "availability": "Passive"},
+        {"name": "Anna Schmidt", "title": "Product Designer", "company": "N26", "location": "Berlin", "skills": ["Product Design", "Figma", "User Testing", "Design Systems"], "years_exp": 4, "seniority": "Mid", "email": "anna.schmidt@email.com", "linkedin_url": "https://linkedin.com/in/annaschmidt", "industry": "FinTech", "availability": "Open to Work"},
+        {"name": "Max Fischer", "title": "Marketing Manager", "company": "SoundCloud", "location": "Berlin", "skills": ["Content Marketing", "Social Media", "Brand Strategy", "Analytics"], "years_exp": 5, "seniority": "Mid", "email": "max.fischer@email.com", "linkedin_url": "https://linkedin.com/in/maxfischer", "industry": "Media", "availability": "Active"},
+        {"name": "Lena Weber", "title": "HR Manager", "company": "HelloFresh", "location": "Berlin", "skills": ["Recruitment", "Employee Engagement", "HR Analytics", "Performance Management"], "years_exp": 6, "seniority": "Mid", "email": "lena.weber@email.com", "linkedin_url": "https://linkedin.com/in/lenaweber", "industry": "E-commerce", "availability": "Open to Work"},
+        {"name": "Thomas Bauer", "title": "Senior Data Analyst", "company": "Delivery Hero", "location": "Berlin", "skills": ["SQL", "Python", "Machine Learning", "A/B Testing"], "years_exp": 7, "seniority": "Senior", "email": "thomas.bauer@email.com", "linkedin_url": "https://linkedin.com/in/thomasbauer", "industry": "E-commerce", "availability": "Passive"},
+        {"name": "Julia Hoffmann", "title": "Junior Product Manager", "company": "Trade Republic", "location": "Berlin", "skills": ["Product Development", "User Research", "Agile", "Data Analysis"], "years_exp": 2, "seniority": "Junior", "email": "julia.hoffmann@email.com", "linkedin_url": "https://linkedin.com/in/juliahoffmann", "industry": "FinTech", "availability": "Active"},
+        
+        # New York-based candidates  
+        {"name": "Michael Brooks", "title": "Sales Director", "company": "Bloomberg", "location": "New York", "skills": ["Enterprise Sales", "Financial Services", "Client Relations", "Team Leadership"], "years_exp": 14, "seniority": "Director", "email": "michael.brooks@email.com", "linkedin_url": "https://linkedin.com/in/michaelbrooks", "industry": "Media", "availability": "Passive"},
+        {"name": "Jennifer Adams", "title": "Marketing Director", "company": "Squarespace", "location": "New York", "skills": ["Brand Marketing", "Digital Strategy", "Team Leadership", "Campaign Management"], "years_exp": 10, "seniority": "Director", "email": "jennifer.adams@email.com", "linkedin_url": "https://linkedin.com/in/jenniferadams", "industry": "SaaS", "availability": "Open to Work"},
+        {"name": "David Park", "title": "Finance Director", "company": "Warby Parker", "location": "New York", "skills": ["FP&A", "Strategic Planning", "Investor Relations", "Team Management"], "years_exp": 11, "seniority": "Director", "email": "david.park@email.com", "linkedin_url": "https://linkedin.com/in/davidpark", "industry": "E-commerce", "availability": "Passive"},
+        {"name": "Rachel Green", "title": "HR Director", "company": "Oscar Health", "location": "New York", "skills": ["People Operations", "Talent Strategy", "Culture Development", "Executive Coaching"], "years_exp": 9, "seniority": "Director", "email": "rachel.green@email.com", "linkedin_url": "https://linkedin.com/in/rachelgreen", "industry": "Healthcare", "availability": "Active"},
+        {"name": "Chris Martinez", "title": "Operations Manager", "company": "WeWork", "location": "New York", "skills": ["Facilities Management", "Vendor Relations", "Budget Management", "Team Leadership"], "years_exp": 6, "seniority": "Mid", "email": "chris.martinez@email.com", "linkedin_url": "https://linkedin.com/in/chrismartinez", "industry": "Real Estate", "availability": "Open to Work"},
+        {"name": "Amanda Foster", "title": "Senior Data Analyst", "company": "Datadog", "location": "New York", "skills": ["SQL", "Python", "Data Visualization", "Statistical Analysis"], "years_exp": 5, "seniority": "Mid", "email": "amanda.foster@email.com", "linkedin_url": "https://linkedin.com/in/amandafoster", "industry": "SaaS", "availability": "Passive"},
+        {"name": "Brian Kim", "title": "Junior Marketing Coordinator", "company": "BuzzFeed", "location": "New York", "skills": ["Social Media", "Content Creation", "Email Marketing", "Analytics"], "years_exp": 1, "seniority": "Junior", "email": "brian.kim@email.com", "linkedin_url": "https://linkedin.com/in/briankim", "industry": "Media", "availability": "Active"},
+        
+        # Toronto-based candidates
+        {"name": "Sarah Mitchell", "title": "Product Director", "company": "Wealthsimple", "location": "Toronto", "skills": ["Product Strategy", "Team Leadership", "Fintech", "User Experience"], "years_exp": 10, "seniority": "Director", "email": "sarah.mitchell@email.com", "linkedin_url": "https://linkedin.com/in/sarahmitchell", "industry": "FinTech", "availability": "Passive"},
+        {"name": "Mark Johnson", "title": "Marketing Manager", "company": "Hootsuite", "location": "Toronto", "skills": ["Social Media Marketing", "Content Strategy", "Analytics", "Team Management"], "years_exp": 6, "seniority": "Mid", "email": "mark.johnson@email.com", "linkedin_url": "https://linkedin.com/in/markjohnson", "industry": "SaaS", "availability": "Open to Work"},
+        {"name": "Lisa Chen", "title": "Finance Manager", "company": "Clearco", "location": "Toronto", "skills": ["Financial Modeling", "Venture Finance", "Reporting", "Due Diligence"], "years_exp": 5, "seniority": "Mid", "email": "lisa.chen@email.com", "linkedin_url": "https://linkedin.com/in/lisachen", "industry": "FinTech", "availability": "Active"},
+        {"name": "Daniel Thompson", "title": "HR Manager", "company": "Lightspeed", "location": "Toronto", "skills": ["Talent Acquisition", "Employee Development", "HR Systems", "Culture Building"], "years_exp": 7, "seniority": "Mid", "email": "daniel.thompson@email.com", "linkedin_url": "https://linkedin.com/in/danielthompson", "industry": "SaaS", "availability": "Passive"},
+        {"name": "Emma Wilson", "title": "Sales Manager", "company": "Clio", "location": "Toronto", "skills": ["B2B Sales", "Account Management", "SaaS Sales", "Team Leadership"], "years_exp": 5, "seniority": "Mid", "email": "emma.wilson@email.com", "linkedin_url": "https://linkedin.com/in/emmawilson", "industry": "SaaS", "availability": "Open to Work"},
+        {"name": "Jason Lee", "title": "Junior Data Analyst", "company": "Ritual", "location": "Toronto", "skills": ["SQL", "Excel", "Tableau", "Data Cleaning"], "years_exp": 1, "seniority": "Junior", "email": "jason.lee@email.com", "linkedin_url": "https://linkedin.com/in/jasonlee", "industry": "E-commerce", "availability": "Active"},
+        
+        # Healthcare industry candidates
+        {"name": "Dr. Sarah Williams", "title": "Medical Director", "company": "Teladoc", "location": "New York", "skills": ["Clinical Leadership", "Telemedicine", "Healthcare Strategy", "Team Management"], "years_exp": 15, "seniority": "Director", "email": "sarah.williams@email.com", "linkedin_url": "https://linkedin.com/in/drsarahwilliams", "industry": "Healthcare", "availability": "Passive"},
+        {"name": "Michael Chen", "title": "Healthcare Operations Manager", "company": "One Medical", "location": "San Francisco", "skills": ["Healthcare Operations", "Process Improvement", "Patient Experience", "Team Leadership"], "years_exp": 7, "seniority": "Mid", "email": "michael.chen@email.com", "linkedin_url": "https://linkedin.com/in/michaelchen", "industry": "Healthcare", "availability": "Open to Work"},
+        {"name": "Patricia Rodriguez", "title": "Senior Clinical Data Analyst", "company": "Flatiron Health", "location": "New York", "skills": ["Clinical Data", "SQL", "Python", "Healthcare Analytics"], "years_exp": 6, "seniority": "Senior", "email": "patricia.rodriguez@email.com", "linkedin_url": "https://linkedin.com/in/patriciarodriguez", "industry": "Healthcare", "availability": "Active"},
+        
+        # Consulting candidates
+        {"name": "Robert Anderson", "title": "Senior Consultant", "company": "McKinsey", "location": "New York", "skills": ["Strategy Consulting", "Data Analysis", "Client Management", "Problem Solving"], "years_exp": 5, "seniority": "Mid", "email": "robert.anderson@email.com", "linkedin_url": "https://linkedin.com/in/robertanderson", "industry": "Consulting", "availability": "Passive"},
+        {"name": "Elizabeth Moore", "title": "Management Consultant", "company": "BCG", "location": "London", "skills": ["Business Strategy", "Financial Modeling", "Market Research", "Presentations"], "years_exp": 4, "seniority": "Mid", "email": "elizabeth.moore@email.com", "linkedin_url": "https://linkedin.com/in/elizabethmoore", "industry": "Consulting", "availability": "Open to Work"},
+        {"name": "James Wilson", "title": "Partner", "company": "Bain & Company", "location": "San Francisco", "skills": ["Executive Leadership", "Client Relations", "Team Building", "Strategic Planning"], "years_exp": 14, "seniority": "Director", "email": "james.wilson@email.com", "linkedin_url": "https://linkedin.com/in/jameswilson", "industry": "Consulting", "availability": "Passive"},
+        {"name": "Maria Garcia", "title": "Junior Consultant", "company": "Deloitte", "location": "Toronto", "skills": ["Data Analysis", "PowerPoint", "Excel", "Research"], "years_exp": 2, "seniority": "Junior", "email": "maria.garcia@email.com", "linkedin_url": "https://linkedin.com/in/mariagarcia", "industry": "Consulting", "availability": "Active"},
+        
+        # Additional diverse roles
+        {"name": "Nina Patel", "title": "Product Designer", "company": "Canva", "location": "Singapore", "skills": ["UI/UX Design", "Figma", "User Research", "Prototyping"], "years_exp": 4, "seniority": "Mid", "email": "nina.patel@email.com", "linkedin_url": "https://linkedin.com/in/ninapatel", "industry": "SaaS", "availability": "Open to Work"},
+        {"name": "Carlos Mendez", "title": "Operations Director", "company": "Rappi", "location": "Remote", "skills": ["Operations Strategy", "Logistics", "Team Leadership", "Process Optimization"], "years_exp": 9, "seniority": "Director", "email": "carlos.mendez@email.com", "linkedin_url": "https://linkedin.com/in/carlosmendez", "industry": "E-commerce", "availability": "Passive"},
+        {"name": "Yuki Tanaka", "title": "Senior Marketing Manager", "company": "Mercari", "location": "Singapore", "skills": ["Growth Marketing", "User Acquisition", "Analytics", "Campaign Strategy"], "years_exp": 7, "seniority": "Senior", "email": "yuki.tanaka@email.com", "linkedin_url": "https://linkedin.com/in/yukitanaka", "industry": "E-commerce", "availability": "Active"},
+        {"name": "David Williams", "title": "Finance Director", "company": "Klarna", "location": "London", "skills": ["Corporate Finance", "M&A", "Financial Strategy", "Team Leadership"], "years_exp": 12, "seniority": "Director", "email": "david.williams@email.com", "linkedin_url": "https://linkedin.com/in/davidwilliams", "industry": "FinTech", "availability": "Passive"},
+        {"name": "Laura Martinez", "title": "HR Director", "company": "Spotify", "location": "Berlin", "skills": ["People Strategy", "Organizational Design", "Culture Development", "Executive Coaching"], "years_exp": 11, "seniority": "Director", "email": "laura.martinez@email.com", "linkedin_url": "https://linkedin.com/in/lauramartinez", "industry": "Media", "availability": "Open to Work"},
+        {"name": "Tom Anderson", "title": "Sales Manager", "company": "DocuSign", "location": "San Francisco", "skills": ["SaaS Sales", "Enterprise Sales", "Pipeline Management", "Team Leadership"], "years_exp": 6, "seniority": "Mid", "email": "tom.anderson@email.com", "linkedin_url": "https://linkedin.com/in/tomanderson", "industry": "SaaS", "availability": "Active"},
+        {"name": "Amy Zhang", "title": "Data Analyst", "company": "Pinterest", "location": "San Francisco", "skills": ["SQL", "Python", "A/B Testing", "Product Analytics"], "years_exp": 3, "seniority": "Junior", "email": "amy.zhang@email.com", "linkedin_url": "https://linkedin.com/in/amyzhang", "industry": "Social Media", "availability": "Open to Work"},
+        {"name": "Peter Brown", "title": "Product Manager", "company": "Atlassian", "location": "Toronto", "skills": ["Product Management", "Agile", "User Research", "Roadmapping"], "years_exp": 5, "seniority": "Mid", "email": "peter.brown@email.com", "linkedin_url": "https://linkedin.com/in/peterbrown", "industry": "SaaS", "availability": "Passive"},
     ]
     
     for c in mock_candidates:
@@ -1067,6 +1215,13 @@ async def seed_database():
         await db.candidates.insert_one(candidate.model_dump())
     
     return {"message": "Database seeded", "count": len(mock_candidates)}
+
+@api_router.post("/reseed")
+async def reseed_database():
+    """Clear and reseed database with mock candidates"""
+    await db.candidates.delete_many({})
+    result = await seed_database()
+    return {"message": "Database reseeded", "count": result.get("count", 0)}
 
 # ==================== ROOT ROUTES ====================
 
