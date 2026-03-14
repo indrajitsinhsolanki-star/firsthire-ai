@@ -151,7 +151,7 @@ export default function PricingPage() {
             </div>
             <div>
               <h3 className="font-semibold text-white mb-2">Is there a free trial?</h3>
-              <p className="text-slate-400 text-sm">Yes! Start with our Free plan to explore TalentGPT with no credit card required.</p>
+              <p className="text-slate-400 text-sm">Yes! Start with our Free plan to explore FirstHire.ai with no credit card required.</p>
             </div>
             <div>
               <h3 className="font-semibold text-white mb-2">How do AI Recruiting Agents work?</h3>

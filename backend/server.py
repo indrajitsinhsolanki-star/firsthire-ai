@@ -296,23 +296,23 @@ async def generate_email_ai(candidate: Dict, email_type: str = "initial") -> str
     """Generate AI outreach email"""
     try:
         chat = await get_claude_chat(
-            "You are a recruiting professional. Write personalized, professional outreach emails that are warm but not too casual. Keep emails concise (under 150 words)."
+            "You are a recruiting professional from FirstHire.ai. Write personalized, professional outreach emails that are warm but not too casual. Keep emails concise (under 150 words). Sign off with 'Best regards' and include 'FirstHire.ai Team' in the signature."
         )
         
         if email_type == "initial":
-            prompt = f"""Write an initial outreach email to recruit this candidate:
+            prompt = f"""Write an initial outreach email to recruit this candidate on behalf of FirstHire.ai:
             Name: {candidate.get('name')}
             Title: {candidate.get('title')}
             Company: {candidate.get('company')}
             Skills: {', '.join(candidate.get('skills', [])[:3])}"""
         else:
-            prompt = f"""Write a follow-up email to {candidate.get('name')} who hasn't responded to our initial outreach."""
+            prompt = f"""Write a follow-up email to {candidate.get('name')} who hasn't responded to our initial outreach from FirstHire.ai."""
         
         response = await chat.send_message(UserMessage(text=prompt))
         return response
     except Exception as e:
         logger.error(f"Error generating email: {e}")
-        return f"Hi {candidate.get('name')},\n\nI'm impressed by your background. I think there's a great opportunity that aligns with your experience.\n\nLet's connect!"
+        return f"Hi {candidate.get('name')},\n\nI'm impressed by your background. I think there's a great opportunity that aligns with your experience.\n\nLet's connect!\n\nBest regards,\nFirstHire.ai Team"
 
 def calculate_match_score(candidate: Dict, filters: Dict) -> int:
     """Calculate match score between candidate and search filters"""
@@ -1072,7 +1072,7 @@ async def seed_database():
 
 @api_router.get("/")
 async def root():
-    return {"message": "TalentGPT API", "version": "2.0"}
+    return {"message": "FirstHire.ai API", "version": "2.0"}
 
 @api_router.get("/health")
 async def health():

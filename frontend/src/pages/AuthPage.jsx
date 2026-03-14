@@ -37,7 +37,7 @@ export default function AuthPage() {
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-violet-600/20 border border-violet-500/30 mb-4">
               <Sparkles className="w-8 h-8 text-violet-400" />
             </div>
-            <h1 className="text-3xl font-bold text-gradient mb-2">TalentGPT</h1>
+            <h1 className="text-3xl font-bold text-gradient mb-2">FirstHire.ai</h1>
             <p className="text-slate-400">AI-powered recruiting platform</p>
           </div>
 

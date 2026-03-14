@@ -97,8 +97,16 @@ export default function Dashboard() {
         </aside>
 
         {/* Main Content */}
-        <main className="flex-1 min-h-[calc(100vh-4rem)]">
-          {renderPage()}
+        <main className="flex-1 min-h-[calc(100vh-4rem)] flex flex-col">
+          <div className="flex-1">
+            {renderPage()}
+          </div>
+          {/* Footer */}
+          <footer className="border-t border-slate-700/50 py-6 px-6 text-center">
+            <p className="text-sm text-slate-500">
+              © 2026 FirstHire.ai. All rights reserved.
+            </p>
+          </footer>
         </main>
       </div>
     </div>

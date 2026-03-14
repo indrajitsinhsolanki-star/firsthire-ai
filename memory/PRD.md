@@ -1,11 +1,7 @@
-# TalentGPT AI Recruiting Platform - PRD
+# FirstHire.ai - AI Recruiting Platform PRD
 
 ## Original Problem Statement
-Existing TalentGPT AI recruiting platform built with React + Vite + Tailwind + Supabase. Features already working: search, candidate cards, shortlists, outreach, and insights dashboard.
-
-New features to add:
-1. AI Recruiting Agents — autonomous background sourcing
-2. Team collaboration — share shortlists, add comments, invite via email with Admin/Viewer roles
+Existing TalentGPT AI recruiting platform rebranded to FirstHire.ai. Built with React + Tailwind CSS + FastAPI + MongoDB. Features: AI-powered search, candidate cards, shortlists, outreach, insights dashboard, AI recruiting agents, and team collaboration.
 
 ## Architecture
 - **Frontend**: React (Create React App) + Tailwind CSS (Dark theme)
@@ -40,8 +36,16 @@ New features to add:
 - [x] **AI Integration**: Claude Sonnet 4.5 for:
   - Natural language search query parsing
   - Candidate summary generation
-  - Outreach email generation
-- [x] **Modern Dark Theme UI**: Professional violet/cyan color scheme
+  - Outreach email generation (FirstHire.ai branded)
+- [x] **Rebranding to FirstHire.ai**:
+  - App title and browser tab
+  - Logo text and navbar brand
+  - All page titles and headings
+  - Email templates with FirstHire.ai signature
+  - Loading screens and empty states
+  - Footer copyright (© 2026 FirstHire.ai)
+  - Meta tags and SEO description
+  - README documentation
 
 ## API Endpoints
 ### Auth
@@ -93,6 +97,7 @@ New features to add:
 - [x] Team collaboration
 - [x] AI Recruiting Agents
 - [x] Comments on candidates
+- [x] Rebrand to FirstHire.ai
 
 ### P1 (Future)
 - [ ] Real email sending (currently simulated)
