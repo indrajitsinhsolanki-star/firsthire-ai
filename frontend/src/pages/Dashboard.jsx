@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../App';
-import { Search, Heart, BarChart3, Send, Bot, Users, DollarSign } from 'lucide-react';
+import { Search, Heart, BarChart3, Send, Bot, Users, DollarSign, Shield } from 'lucide-react';
 import SearchPage from './SearchPage';
 import ShortlistsPage from './ShortlistsPage';
 import InsightsPage from './InsightsPage';
@@ -8,6 +8,7 @@ import OutreachPage from './OutreachPage';
 import AgentsPage from './AgentsPage';
 import TeamsPage from './TeamsPage';
 import PricingPage from './PricingPage';
+import VerifyCandidatePage from './VerifyCandidatePage';
 
 export default function Dashboard() {
   const { api } = useAuth();
@@ -20,6 +21,7 @@ export default function Dashboard() {
 
   const navItems = [
     { id: 'search', label: 'Search', icon: Search },
+    { id: 'verify', label: 'Verify', icon: Shield, isNew: true },
     { id: 'shortlists', label: 'Shortlists', icon: Heart },
     { id: 'agents', label: 'AI Agents', icon: Bot },
     { id: 'teams', label: 'Teams', icon: Users },
@@ -32,6 +34,8 @@ export default function Dashboard() {
     switch (currentPage) {
       case 'search':
         return <SearchPage />;
+      case 'verify':
+        return <VerifyCandidatePage />;
       case 'shortlists':
         return <ShortlistsPage />;
       case 'agents':
@@ -69,6 +73,11 @@ export default function Dashboard() {
               >
                 <Icon size={16} />
                 <span>{item.label}</span>
+                {item.isNew && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white rounded-full">
+                    NEW
+                  </span>
+                )}
               </button>
             );
           })}
@@ -85,11 +94,18 @@ export default function Dashboard() {
                 <button
                   key={item.id}
                   onClick={() => setCurrentPage(item.id)}
-                  className={`w-full nav-item ${currentPage === item.id ? 'nav-item-active' : ''}`}
+                  className={`w-full nav-item justify-between ${currentPage === item.id ? 'nav-item-active' : ''}`}
                   data-testid={`nav-${item.id}`}
                 >
-                  <Icon size={18} />
-                  <span>{item.label}</span>
+                  <div className="flex items-center gap-2">
+                    <Icon size={18} />
+                    <span>{item.label}</span>
+                  </div>
+                  {item.isNew && (
+                    <span className="px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white rounded-full animate-pulse">
+                      NEW
+                    </span>
+                  )}
                 </button>
               );
             })}

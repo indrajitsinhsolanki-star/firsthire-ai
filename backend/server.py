@@ -197,6 +197,28 @@ class CreateTeam(BaseModel):
 class ShareShortlist(BaseModel):
     team_id: str
 
+class VerifyCandidate(BaseModel):
+    github_username: str
+    job_requirements: Optional[str] = None
+
+class Verification(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    github_username: str
+    job_requirements: Optional[str] = None
+    authenticity_score: int = 0
+    skill_match_score: int = 0
+    recommendation: str = ""
+    summary: str = ""
+    red_flags: List[str] = []
+    green_flags: List[str] = []
+    skill_evidence: Dict[str, str] = {}
+    interview_questions: List[str] = []
+    github_data: Dict[str, Any] = {}
+    full_report: Dict[str, Any] = {}
+    analyzed_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
 # ==================== HELPER FUNCTIONS ====================
 
 def hash_password(password: str) -> str:
@@ -1104,6 +1126,185 @@ async def get_insights(token: str):
         "skills": [{"skill": s[0], "count": s[1]} for s in top_skills],
         "locations": [{"name": l["_id"], "value": l["count"]} for l in locations],
         "seniorities": [{"name": s["_id"], "value": s["count"]} for s in seniorities]
+    }
+
+# ==================== VERIFICATION ROUTES (Authenticity Engine) ====================
+
+from services.github_service import get_full_github_analysis
+from services.claude_service import analyze_candidate
+
+@api_router.post("/verify-candidate")
+async def verify_candidate(data: VerifyCandidate, token: str):
+    """
+    Verify a candidate's GitHub profile authenticity
+    """
+    session = await db.sessions.find_one({"token": token})
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user_id = session['user_id']
+    
+    # Fetch GitHub data
+    github_data = await get_full_github_analysis(data.github_username)
+    
+    if github_data.get("error") == "user_not_found":
+        raise HTTPException(status_code=404, detail=f"GitHub user '{data.github_username}' not found")
+    
+    if github_data.get("error") == "rate_limit":
+        raise HTTPException(status_code=429, detail="GitHub API rate limit reached. Please try again later.")
+    
+    # Analyze with Claude AI
+    analysis = await analyze_candidate(github_data, data.job_requirements or "")
+    
+    # Create verification record
+    verification = Verification(
+        user_id=user_id,
+        github_username=data.github_username,
+        job_requirements=data.job_requirements,
+        authenticity_score=analysis.get("authenticity_score", 0),
+        skill_match_score=analysis.get("skill_match_score", 0),
+        recommendation=analysis.get("recommendation", "Unknown"),
+        summary=analysis.get("summary", ""),
+        red_flags=analysis.get("red_flags", []),
+        green_flags=analysis.get("green_flags", []),
+        skill_evidence=analysis.get("skill_evidence", {}),
+        interview_questions=analysis.get("interview_questions", []),
+        github_data=github_data,
+        full_report=analysis
+    )
+    
+    # Store in database
+    await db.verifications.insert_one(verification.model_dump())
+    
+    return {
+        "id": verification.id,
+        "github_username": data.github_username,
+        "authenticity_score": analysis.get("authenticity_score", 0),
+        "skill_match_score": analysis.get("skill_match_score", 0),
+        "confidence_level": analysis.get("confidence_level", "medium"),
+        "recommendation": analysis.get("recommendation", "Unknown"),
+        "recommendation_reason": analysis.get("recommendation_reason", ""),
+        "summary": analysis.get("summary", ""),
+        "red_flags": analysis.get("red_flags", []),
+        "green_flags": analysis.get("green_flags", []),
+        "skill_evidence": analysis.get("skill_evidence", {}),
+        "interview_questions": analysis.get("interview_questions", []),
+        "github_data": {
+            "username": github_data.get("username"),
+            "name": github_data.get("name"),
+            "avatar_url": github_data.get("avatar_url"),
+            "html_url": github_data.get("html_url"),
+            "bio": github_data.get("bio"),
+            "location": github_data.get("location"),
+            "company": github_data.get("company"),
+            "followers": github_data.get("followers"),
+            "public_repos": github_data.get("public_repos"),
+            "total_repos": github_data.get("total_repos"),
+            "original_repos": github_data.get("original_repos"),
+            "forked_repos": github_data.get("forked_repos"),
+            "fork_percentage": github_data.get("fork_percentage"),
+            "top_languages": github_data.get("top_languages", []),
+            "total_stars_received": github_data.get("total_stars_received"),
+            "recent_commits": github_data.get("recent_commits"),
+            "account_age_days": github_data.get("account_age_days"),
+            "substantial_projects": github_data.get("substantial_projects", [])[:5]
+        },
+        "analyzed_at": verification.analyzed_at
+    }
+
+@api_router.get("/verification-history")
+async def get_verification_history(token: str, limit: int = 20):
+    """
+    Get verification history for the logged-in user
+    """
+    session = await db.sessions.find_one({"token": token})
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user_id = session['user_id']
+    
+    verifications = await db.verifications.find(
+        {"user_id": user_id},
+        {"_id": 0, "full_report": 0, "github_data": 0}  # Exclude large fields for list view
+    ).sort("analyzed_at", -1).to_list(limit)
+    
+    return verifications
+
+@api_router.get("/verification/{verification_id}")
+async def get_verification(verification_id: str, token: str):
+    """
+    Get a specific verification by ID
+    """
+    session = await db.sessions.find_one({"token": token})
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    verification = await db.verifications.find_one(
+        {"id": verification_id, "user_id": session['user_id']},
+        {"_id": 0}
+    )
+    
+    if not verification:
+        raise HTTPException(status_code=404, detail="Verification not found")
+    
+    return verification
+
+@api_router.delete("/verification/{verification_id}")
+async def delete_verification(verification_id: str, token: str):
+    """
+    Delete a verification record
+    """
+    session = await db.sessions.find_one({"token": token})
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    result = await db.verifications.delete_one({
+        "id": verification_id,
+        "user_id": session['user_id']
+    })
+    
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Verification not found")
+    
+    return {"success": True}
+
+@api_router.get("/verification-stats")
+async def get_verification_stats(token: str):
+    """
+    Get verification statistics for the dashboard
+    """
+    session = await db.sessions.find_one({"token": token})
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user_id = session['user_id']
+    
+    # Get total count
+    total = await db.verifications.count_documents({"user_id": user_id})
+    
+    # Get recommendation breakdown
+    pipeline = [
+        {"$match": {"user_id": user_id}},
+        {"$group": {"_id": "$recommendation", "count": {"$sum": 1}}}
+    ]
+    recommendations = await db.verifications.aggregate(pipeline).to_list(10)
+    
+    # Get average scores
+    avg_pipeline = [
+        {"$match": {"user_id": user_id}},
+        {"$group": {
+            "_id": None,
+            "avg_authenticity": {"$avg": "$authenticity_score"},
+            "avg_skill_match": {"$avg": "$skill_match_score"}
+        }}
+    ]
+    averages = await db.verifications.aggregate(avg_pipeline).to_list(1)
+    
+    return {
+        "total_verifications": total,
+        "recommendations": {r["_id"]: r["count"] for r in recommendations},
+        "average_authenticity_score": round(averages[0]["avg_authenticity"], 1) if averages else 0,
+        "average_skill_match_score": round(averages[0]["avg_skill_match"], 1) if averages else 0
     }
 
 # ==================== SEED DATA ====================

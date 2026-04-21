@@ -278,6 +278,62 @@ class TalentGPTAPITester:
             self.log(f"AI Summary length: {len(summary)} characters")
         return success, response
 
+    def test_verify_candidate(self, github_username, job_requirements=None):
+        """Test GitHub candidate verification (Authenticity Engine)"""
+        success, response = self.run_test(
+            f"Verify GitHub Candidate: {github_username}",
+            "POST",
+            "verify-candidate",
+            200,
+            data={
+                "github_username": github_username,
+                "job_requirements": job_requirements
+            }
+        )
+        if success:
+            auth_score = response.get('authenticity_score', 0)
+            skill_score = response.get('skill_match_score', 0)
+            recommendation = response.get('recommendation', 'Unknown')
+            self.log(f"Verification: Auth={auth_score}/100, Skill={skill_score}/100, Rec={recommendation}")
+        return success, response
+
+    def test_verify_invalid_user(self, invalid_username):
+        """Test verification with invalid GitHub username"""
+        success, response = self.run_test(
+            f"Verify Invalid User: {invalid_username}",
+            "POST",
+            "verify-candidate",
+            404,  # Expecting 404 for invalid user
+            data={"github_username": invalid_username}
+        )
+        return success, response
+
+    def test_get_verification_history(self):
+        """Test getting verification history"""
+        success, response = self.run_test(
+            "Get Verification History",
+            "GET",
+            "verification-history",
+            200
+        )
+        if success:
+            self.log(f"Found {len(response)} verification records")
+        return success, response
+
+    def test_get_verification_stats(self):
+        """Test getting verification statistics"""
+        success, response = self.run_test(
+            "Get Verification Stats",
+            "GET",
+            "verification-stats",
+            200
+        )
+        if success:
+            total = response.get('total_verifications', 0)
+            avg_auth = response.get('average_authenticity_score', 0)
+            self.log(f"Verification stats: {total} total, {avg_auth} avg authenticity")
+        return success, response
+
 def main():
     print("🚀 Starting TalentGPT API Tests")
     print("=" * 50)
@@ -382,6 +438,30 @@ def main():
     if candidates:
         candidate_id = candidates[0]['id']
         tester.test_candidate_summary(candidate_id)
+
+    # Test new Authenticity Engine features
+    tester.log("Testing Authenticity Engine (GitHub Verification)...")
+    
+    # Test valid GitHub users
+    valid_users = ['torvalds', 'gvanrossum', 'sindresorhus']
+    verification_success_count = 0
+    
+    for username in valid_users:
+        verify_success, verify_result = tester.test_verify_candidate(
+            username, 
+            "Senior Software Engineer with experience in Python, system architecture, and open source development."
+        )
+        if verify_success:
+            verification_success_count += 1
+    
+    # Test invalid GitHub user
+    tester.test_verify_invalid_user("nonexistent_github_user_12345")
+    
+    # Test verification history and stats
+    tester.test_get_verification_history()
+    tester.test_get_verification_stats()
+    
+    tester.log(f"Authenticity Engine: {verification_success_count}/{len(valid_users)} verifications successful")
 
     # Print final results
     print("\n" + "=" * 50)
